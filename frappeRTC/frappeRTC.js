@@ -1,7 +1,6 @@
 module.exports = class FrappeRTC {
 
     constructor(){
-        this.rtcPeerConnection;
         this.iceServers = {
             'iceServers': [{
                     'url': 'stun:stun.services.mozilla.com'
@@ -11,11 +10,11 @@ module.exports = class FrappeRTC {
                 }
             ]
         };
+
+        this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);
     }   
 
-    async createOffer() {        
-        this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);
-        
+    async createOffer() {      
         return await this.rtcPeerConnection.createOffer()
             .then(desc => {
                 this.rtcPeerConnection.setLocalDescription(desc);
@@ -24,8 +23,7 @@ module.exports = class FrappeRTC {
             .catch(e => console.log(e));
     }
 
-    async createAnswer(offer) {       
-        this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);
+    async createAnswer(offer) { 
         this.rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(offer));
         
         return await this.rtcPeerConnection.createAnswer()
