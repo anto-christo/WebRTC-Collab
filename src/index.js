@@ -1,1 +1,1 @@
-require('./js/client');
+require('./js/index');

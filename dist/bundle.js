@@ -1,10 +1,12 @@
 var desk = (function () {
     'use strict';
 
-    var frappeRTC = class FrappeRTC {
+    var webrtc = class WebRTC {
 
-        constructor(){
-            this.rtcPeerConnection;
+        constructor(roomName){
+            this.type;
+            this.dataChannel;
+            this.roomName = roomName;
             this.iceServers = {
                 'iceServers': [{
                         'url': 'stun:stun.services.mozilla.com'
@@ -14,50 +16,150 @@ var desk = (function () {
                     }
                 ]
             };
-        }   
+            this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);        
+        }
 
-        async createOffer() {        
-            this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);
-            
+        initConnection(roomName){
+            this.roomName = roomName;
+            this.createDataChannel();
+            this.onIceCandidate(this);
+            this.setupSocketHandlers(this);
+            socket.emit('create or join', this.roomName);
+        }
+
+        onIceCandidate(that){
+            this.rtcPeerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    console.log('sending ice candidate');
+                    socket.emit('candidate', {
+                        label: event.candidate.sdpMLineIndex,
+                        id: event.candidate.sdpMid,
+                        candidate: event.candidate.candidate,
+                        room: that.roomName
+                    });
+                }
+            };
+        }
+
+        setupSocketHandlers(that){
+            socket.on('created',function(){
+                that.type = 'host';
+                console.log('Host ready');
+
+            });
+
+            socket.on('joined', function(room) {
+                that.type = 'client';
+                console.log('Client ready');
+                socket.emit('ready',room);
+            });
+
+            socket.on('createOffer',function(room){
+                if(that.type=='host'){
+                    that.createOffer(that).then(offer => {
+                        console.log(offer);
+                        socket.emit('offer',{room:room, offer:offer});
+                    });
+                }
+            });
+
+            socket.on('sendOffer',function(event) {
+                if(that.type=='client'){
+                    that.createAnswer(that,event.offer).then(answer => {
+                        console.log(answer);
+                        socket.emit('answer',{room:event.room, answer: answer});
+                    });   
+                }
+            });
+
+            socket.on('sendAnswer', function(answer){
+                if(that.type=='host'){
+                    that.setHostRemote(answer);
+                }
+            });
+
+            socket.on('candidate', function (event) {
+                var candidate = new RTCIceCandidate({
+                    sdpMLineIndex: event.label,
+                    candidate: event.candidate
+                });
+                that.rtcPeerConnection.addIceCandidate(candidate);
+            });
+        }
+
+        async createOffer(that) {
             return await this.rtcPeerConnection.createOffer()
+            .then(desc => {
+                that.rtcPeerConnection.setLocalDescription(desc);
+                return desc;
+            })
+            .catch(e => console.log(e));
+        }
+
+        async createAnswer(that,offer) {
+            console.log(offer);
+            this.rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        
+            return await this.rtcPeerConnection.createAnswer()
                 .then(desc => {
-                    this.rtcPeerConnection.setLocalDescription(desc);
+                    that.rtcPeerConnection.setLocalDescription(desc);
                     return desc;
                 })
                 .catch(e => console.log(e));
         }
 
-        async createAnswer(offer) {       
-            this.rtcPeerConnection = new RTCPeerConnection(this.iceServers);
-            this.rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        setHostRemote(answer){
+            console.log(answer);
+            this.rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+
+        createDataChannel(){
+            this.dataChannel = this.rtcPeerConnection.createDataChannel("myDataChannel");
+        
+            this.dataChannel.onerror = function (error) {
+                console.log("Data Channel Error:", error);
+            };
             
-            return await this.rtcPeerConnection.createAnswer()
-                .then(desc => {
-                    this.rtcPeerConnection.setLocalDescription(desc);
-                    return desc;
-                })
-                .catch(e => console.log(e));
+            this.dataChannel.onopen = function () {
+                console.log("The Data Channel is Open");
+            };
+            
+            this.dataChannel.onclose = function () {
+                console.log("The Data Channel is Closed");
+            };
+
+            this.setupReceiver();
+        }
+
+        setupReceiver(){
+            this.rtcPeerConnection.ondatachannel = event => {
+                const receiveChannel = event.channel;
+                receiveChannel.onmessage = message => this.onDataReceive(message.data);
+            };
+        }
+
+        sendData(data){
+            this.dataChannel.send(data);
         }
     };
 
-    var frappeRTC$1 = /*#__PURE__*/Object.freeze({
-        default: frappeRTC,
-        __moduleExports: frappeRTC
-    });
+    var webRTC = new webrtc();
 
-    var FrappeRTC = ( frappeRTC$1 && frappeRTC ) || frappeRTC$1;
+    var socket$1 = io();
+    window.socket = socket$1;
 
-    const frappeRTC$2 = new FrappeRTC();
+    var message = document.getElementById("message");
+    var sendBtn = document.getElementById("send");
 
-    frappeRTC$2.createOffer().then(offer => {
+    var id = prompt("Enter Name of Room:");
+    webRTC.initConnection(id);
 
-            console.log(offer);    
-            
-            frappeRTC$2.createAnswer(offer).then(answer => {
+    sendBtn.onclick = function(){
+        var text = message.value;
+        webRTC.sendData(text);
+    };
 
-                console.log(answer);
-            });
-    });
+    webRTC.onDataReceive = data => console.log(data);
 
     var src = {
 
